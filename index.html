@@ -134,6 +134,7 @@
       scanning: false,
       lastCode: '',
       lastAt: 0,
+      audioCtx: null,
     };
 
     const els = {
@@ -145,6 +146,66 @@
       reloadConfigBtn: document.getElementById('reloadConfigBtn'),
       apiStatus: document.getElementById('apiStatus'),
     };
+
+    function ensureAudio() {
+      if (!state.audioCtx) {
+        state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (state.audioCtx.state === 'suspended') {
+        state.audioCtx.resume();
+      }
+      return state.audioCtx;
+    }
+
+    function playShararan() {
+      const ctx = ensureAudio();
+      const t0 = ctx.currentTime;
+      const melody = [523.25, 659.25, 783.99, 1046.5, 1318.51];
+      melody.forEach((freq, i) => {
+        const start = t0 + i * 0.06;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = i < melody.length - 1 ? 'triangle' : 'sine';
+        osc.frequency.setValueAtTime(freq, start);
+        gain.gain.setValueAtTime(0.0001, start);
+        gain.gain.exponentialRampToValueAtTime(0.18, start + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.45);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(start);
+        osc.stop(start + 0.5);
+      });
+      [2093, 2637].forEach((freq, i) => {
+        const start = t0 + 0.18 + i * 0.05;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, start);
+        gain.gain.setValueAtTime(0.0001, start);
+        gain.gain.exponentialRampToValueAtTime(0.06, start + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.2);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(start);
+        osc.stop(start + 0.22);
+      });
+    }
+
+    function playShortBeep() {
+      const ctx = ensureAudio();
+      const t0 = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(440, t0);
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(0.12, t0 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.2);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(t0);
+      osc.stop(t0 + 0.22);
+    }
 
     function setApiStatus(text, ok) {
       els.apiStatus.textContent = 'API: ' + text;
@@ -269,6 +330,9 @@
       }
       if (state.config && state.config.showScannedCode) lines.push('<p class="code">' + escapeHtml(payload.code || '') + '</p>');
       box.innerHTML = lines.join('');
+
+      if (payload.status === 'scanned') playShararan();
+      else if (payload.status === 'alreadyScanned') playShortBeep();
     }
 
     function escapeHtml(s) {
@@ -306,6 +370,7 @@
 
     els.startBtn.addEventListener('click', async () => {
       try {
+        ensureAudio();
         renderResult({ status: 'error', message: 'カメラを起動しています…' });
         const configPromise = loadConfig().catch((err) => {
           setApiStatus('接続失敗', false);
