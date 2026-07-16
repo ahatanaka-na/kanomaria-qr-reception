@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>愛の不定置 QR受付</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --ok: #16a34a;
+      --warn: #ca8a04;
+      --err: #dc2626;
+      --accent: #e879f9;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Hiragino Sans", "Noto Sans JP", sans-serif;
+      background: radial-gradient(circle at top, #1e293b, var(--bg));
+      color: var(--text);
+      min-height: 100dvh;
+    }
+    .app {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 16px;
+      display: grid;
+      gap: 12px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 1.1rem;
+      letter-spacing: 0.04em;
+    }
+    .sub { color: var(--muted); font-size: 0.85rem; margin: 0; }
+    .camera-wrap {
+      position: relative;
+      border-radius: 16px;
+      overflow: hidden;
+      background: #000;
+      aspect-ratio: 3 / 4;
+      box-shadow: 0 12px 40px rgba(0,0,0,.35);
+    }
+    video, canvas { width: 100%; height: 100%; object-fit: cover; display: block; }
+    canvas { display: none; }
+    .overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      border: 2px solid rgba(232,121,249,.65);
+      border-radius: 16px;
+      box-shadow: inset 0 0 0 9999px rgba(0,0,0,.25);
+    }
+    .scan-line {
+      position: absolute;
+      left: 12%;
+      right: 12%;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      animation: scan 2.2s ease-in-out infinite;
+    }
+    @keyframes scan {
+      0%, 100% { top: 18%; opacity: .3; }
+      50% { top: 78%; opacity: 1; }
+    }
+    .toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
+    button {
+      border: 0;
+      border-radius: 999px;
+      padding: 10px 16px;
+      font-size: 0.95rem;
+      cursor: pointer;
+      background: #334155;
+      color: var(--text);
+    }
+    button.primary { background: linear-gradient(135deg, #a855f7, #ec4899); }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .result {
+      border-radius: 16px;
+      padding: 16px;
+      background: rgba(17,24,39,.9);
+      border: 1px solid #334155;
+      min-height: 120px;
+    }
+    .result.ok { border-color: rgba(22,163,74,.6); background: rgba(22,163,74,.12); }
+    .result.warn { border-color: rgba(202,138,4,.6); background: rgba(202,138,4,.12); }
+    .result.err { border-color: rgba(220,38,38,.6); background: rgba(220,38,38,.12); }
+    .status-label { font-size: 1.4rem; font-weight: 700; margin: 0 0 8px; }
+    .guest { margin: 0; line-height: 1.6; }
+    .code { color: var(--muted); font-size: 0.85rem; word-break: break-all; margin-top: 8px; }
+    .error { color: #fecaca; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>愛の不定置 QR受付</h1>
+      <p class="sub">カメラをQRコードに向けてください</p>
+    </header>
+
+    <div class="camera-wrap">
+      <video id="video" playsinline muted autoplay></video>
+      <canvas id="canvas"></canvas>
+      <div class="overlay"></div>
+      <div class="scan-line"></div>
+    </div>
+
+    <div class="toolbar">
+      <button id="startBtn" class="primary">カメラ開始</button>
+      <button id="switchBtn" hidden>カメラ切替</button>
+      <button id="reloadConfigBtn">設定再読込</button>
+    </div>
+
+    <section id="result" class="result">
+      <p class="sub">待機中…</p>
+    </section>
+  </div>
+
+  <script>
+    // デプロイ後に GAS Webアプリの exec URL を設定してください
+    const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbwVZJvl71WcQEMvkJbYYr2tP9mgTFjJ4uP-7yDE6fwO5asuIOMBs2yIK5ZouGTrLJsI/exec';
+
+    const state = {
+      config: null,
+      stream: null,
+      devices: [],
+      deviceIndex: 0,
+      scanning: false,
+      lastCode: '',
+      lastAt: 0,
+    };
+
+    const els = {
+      video: document.getElementById('video'),
+      canvas: document.getElementById('canvas'),
+      result: document.getElementById('result'),
+      startBtn: document.getElementById('startBtn'),
+      switchBtn: document.getElementById('switchBtn'),
+      reloadConfigBtn: document.getElementById('reloadConfigBtn'),
+    };
+
+    function ensureApiUrl() {
+      if (!GAS_API_URL || GAS_API_URL.includes('REPLACE_WITH')) {
+        throw new Error('scanner/index.html の GAS_API_URL を設定してください');
+      }
+    }
+
+    function jsonp(url) {
+      return new Promise((resolve, reject) => {
+        const cb = 'cb_' + Date.now() + '_' + Math.floor(Math.random() * 10000);
+        const script = document.createElement('script');
+        const timer = setTimeout(() => {
+          cleanup();
+          reject(new Error('API timeout'));
+        }, 15000);
+
+        function cleanup() {
+          clearTimeout(timer);
+          delete window[cb];
+          script.remove();
+        }
+
+        window[cb] = (data) => {
+          cleanup();
+          resolve(data);
+        };
+
+        const sep = url.includes('?') ? '&' : '?';
+        script.src = url + sep + 'callback=' + cb;
+        script.onerror = () => {
+          cleanup();
+          reject(new Error('API load error'));
+        };
+        document.head.appendChild(script);
+      });
+    }
+
+    async function loadConfig() {
+      ensureApiUrl();
+      const data = await jsonp(GAS_API_URL + '?action=config');
+      if (!data.ok) throw new Error(data.error || 'config error');
+      state.config = data.config;
+      els.switchBtn.hidden = !state.config.showCameraSwitch;
+      await loadJsQr(state.config.jsQrUrl);
+    }
+
+    function loadJsQr(url) {
+      if (window.jsQR) return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = url;
+        script.onload = resolve;
+        script.onerror = () => reject(new Error('jsQR load failed'));
+        document.head.appendChild(script);
+      });
+    }
+
+    async function startCamera() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('このブラウザはカメラに対応していません');
+      }
+      stopCamera();
+      const devices = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+      state.devices = devices.length ? devices : [{ deviceId: undefined }];
+      const device = state.devices[state.deviceIndex] || state.devices[0];
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          deviceId: device.deviceId ? { exact: device.deviceId } : undefined,
+          facingMode: device.deviceId ? undefined : { ideal: 'environment' },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      });
+      state.stream = stream;
+      els.video.srcObject = stream;
+      await els.video.play();
+      state.scanning = true;
+      els.startBtn.textContent = 'スキャン中';
+      requestAnimationFrame(scanLoop);
+    }
+
+    function stopCamera() {
+      state.scanning = false;
+      if (state.stream) {
+        state.stream.getTracks().forEach((t) => t.stop());
+        state.stream = null;
+      }
+    }
+
+    function renderResult(payload) {
+      const box = els.result;
+      box.className = 'result';
+      if (!payload || payload.status === 'error') {
+        box.classList.add('err');
+        box.innerHTML = '<p class="status-label">エラー</p><p class="error">' + (payload && payload.message ? payload.message : '不明なエラー') + '</p>';
+        return;
+      }
+      if (payload.status === 'scanned') box.classList.add('ok');
+      else if (payload.status === 'alreadyScanned') box.classList.add('warn');
+      else box.classList.add('err');
+
+      const guest = payload.guest || {};
+      const lines = [];
+      if (payload.status === 'scanned') lines.push('<p class="status-label">' + escapeHtml(payload.message1 || 'OK') + '</p>');
+      if (payload.status === 'alreadyScanned') lines.push('<p class="status-label">' + escapeHtml(payload.message1 || '') + '</p><p>' + escapeHtml(payload.message2 || '') + '</p>');
+      if (payload.status === 'notFound') lines.push('<p class="status-label">' + escapeHtml(payload.message1 || '') + '</p><p>' + escapeHtml(payload.message2 || '') + '</p>');
+      if (guest['氏名']) {
+        const tableNo = guest['テーブル番号'] || guest['座席番号'] || '';
+        const detail = tableNo ? 'テーブル ' + tableNo : (guest['所属'] || '');
+        lines.push('<p class="guest"><strong>' + escapeHtml(guest['氏名']) + '</strong> 様<br>' + escapeHtml(detail) + '</p>');
+      }
+      if (state.config && state.config.showScannedCode) lines.push('<p class="code">' + escapeHtml(payload.code || '') + '</p>');
+      box.innerHTML = lines.join('');
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+
+    async function submitScan(code) {
+      const now = Date.now();
+      if (code === state.lastCode && now - state.lastAt < 2500) return;
+      state.lastCode = code;
+      state.lastAt = now;
+      try {
+        const data = await jsonp(GAS_API_URL + '?action=scan&code=' + encodeURIComponent(code));
+        renderResult(data);
+      } catch (err) {
+        renderResult({ status: 'error', message: String(err) });
+      }
+    }
+
+    function scanLoop() {
+      if (!state.scanning) return;
+      const video = els.video;
+      if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        const canvas = els.canvas;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const found = window.jsQR && window.jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
+        if (found && found.data) submitScan(found.data);
+      }
+      requestAnimationFrame(scanLoop);
+    }
+
+    els.startBtn.addEventListener('click', async () => {
+      try {
+        await loadConfig();
+        await startCamera();
+      } catch (err) {
+        renderResult({ status: 'error', message: String(err) });
+      }
+    });
+
+    els.switchBtn.addEventListener('click', async () => {
+      if (!state.devices.length) return;
+      state.deviceIndex = (state.deviceIndex + 1) % state.devices.length;
+      try {
+        await startCamera();
+      } catch (err) {
+        renderResult({ status: 'error', message: String(err) });
+      }
+    });
+
+    els.reloadConfigBtn.addEventListener('click', async () => {
+      try {
+        await loadConfig();
+        renderResult({ status: 'scanned', message1: '設定を再読込しました', guest: {}, code: '' });
+      } catch (err) {
+        renderResult({ status: 'error', message: String(err) });
+      }
+    });
+
+    window.addEventListener('beforeunload', stopCamera);
+  </script>
+</body>
+</html>
