@@ -2,17 +2,13 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>愛の不定置 QR受付</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>愛の不時着 QR受付</title>
   <style>
     :root {
       --bg: #0f172a;
-      --panel: #111827;
       --text: #f8fafc;
       --muted: #94a3b8;
-      --ok: #16a34a;
-      --warn: #ca8a04;
-      --err: #dc2626;
       --accent: #e879f9;
     }
     * { box-sizing: border-box; }
@@ -21,27 +17,24 @@
       font-family: "Hiragino Sans", "Noto Sans JP", sans-serif;
       background: radial-gradient(circle at top, #1e293b, var(--bg));
       color: var(--text);
-      min-height: 100dvh;
+      min-height: 100vh;
     }
     .app {
-      max-width: 720px;
+      max-width: 1100px;
       margin: 0 auto;
-      padding: 16px;
+      padding: 20px;
       display: grid;
-      gap: 12px;
+      gap: 16px;
     }
-    h1 {
-      margin: 0;
-      font-size: 1.1rem;
-      letter-spacing: 0.04em;
-    }
-    .sub { color: var(--muted); font-size: 0.85rem; margin: 0; }
+    h1 { margin: 0; font-size: 1.5rem; }
+    .sub { color: var(--muted); font-size: 0.95rem; margin: 0; }
     .camera-wrap {
       position: relative;
       border-radius: 16px;
       overflow: hidden;
       background: #000;
-      aspect-ratio: 3 / 4;
+      aspect-ratio: 16 / 9;
+      min-height: 360px;
       box-shadow: 0 12px 40px rgba(0,0,0,.35);
     }
     video, canvas { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -52,35 +45,43 @@
       pointer-events: none;
       border: 2px solid rgba(232,121,249,.65);
       border-radius: 16px;
-      box-shadow: inset 0 0 0 9999px rgba(0,0,0,.25);
+      box-shadow: inset 0 0 0 9999px rgba(0,0,0,.18);
     }
     .scan-line {
       position: absolute;
-      left: 12%;
-      right: 12%;
+      left: 10%;
+      right: 10%;
       height: 2px;
       background: linear-gradient(90deg, transparent, var(--accent), transparent);
       animation: scan 2.2s ease-in-out infinite;
     }
     @keyframes scan {
-      0%, 100% { top: 18%; opacity: .3; }
-      50% { top: 78%; opacity: 1; }
+      0%, 100% { top: 15%; opacity: .3; }
+      50% { top: 85%; opacity: 1; }
     }
-    .toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
+    .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
     button {
       border: 0;
       border-radius: 999px;
-      padding: 10px 16px;
-      font-size: 0.95rem;
+      padding: 12px 20px;
+      font-size: 1rem;
       cursor: pointer;
       background: #334155;
       color: var(--text);
     }
     button.primary { background: linear-gradient(135deg, #a855f7, #ec4899); }
     button:disabled { opacity: .5; cursor: not-allowed; }
+    .status-pill {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: #1e293b;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
     .result {
       border-radius: 16px;
-      padding: 16px;
+      padding: 20px;
       background: rgba(17,24,39,.9);
       border: 1px solid #334155;
       min-height: 120px;
@@ -88,17 +89,17 @@
     .result.ok { border-color: rgba(22,163,74,.6); background: rgba(22,163,74,.12); }
     .result.warn { border-color: rgba(202,138,4,.6); background: rgba(202,138,4,.12); }
     .result.err { border-color: rgba(220,38,38,.6); background: rgba(220,38,38,.12); }
-    .status-label { font-size: 1.4rem; font-weight: 700; margin: 0 0 8px; }
-    .guest { margin: 0; line-height: 1.6; }
-    .code { color: var(--muted); font-size: 0.85rem; word-break: break-all; margin-top: 8px; }
-    .error { color: #fecaca; font-size: 0.9rem; }
+    .status-label { font-size: 1.6rem; font-weight: 700; margin: 0 0 8px; }
+    .guest { margin: 0; line-height: 1.7; font-size: 1.1rem; }
+    .code { color: var(--muted); font-size: 0.9rem; word-break: break-all; margin-top: 8px; }
+    .error { color: #fecaca; font-size: 0.95rem; white-space: pre-wrap; }
   </style>
 </head>
 <body>
   <div class="app">
     <header>
-      <h1>愛の不定置 QR受付</h1>
-      <p class="sub">カメラをQRコードに向けてください</p>
+      <h1>愛の不時着 QR受付</h1>
+      <p class="sub">PCのWebカメラまたはタブレットでQRコードを読み取ります</p>
     </header>
 
     <div class="camera-wrap">
@@ -112,16 +113,18 @@
       <button id="startBtn" class="primary">カメラ開始</button>
       <button id="switchBtn" hidden>カメラ切替</button>
       <button id="reloadConfigBtn">設定再読込</button>
+      <span id="apiStatus" class="status-pill">API: 未接続</span>
     </div>
 
     <section id="result" class="result">
-      <p class="sub">待機中…</p>
+      <p class="sub">「カメラ開始」を押してください。初回はカメラの使用を許可してください。</p>
     </section>
   </div>
 
   <script>
-    // デプロイ後に GAS Webアプリの exec URL を設定してください
     const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbwVZJvl71WcQEMvkJbYYr2tP9mgTFjJ4uP-7yDE6fwO5asuIOMBs2yIK5ZouGTrLJsI/exec';
+    const JSQR_URL = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js';
+    const IS_MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
     const state = {
       config: null,
@@ -140,51 +143,32 @@
       startBtn: document.getElementById('startBtn'),
       switchBtn: document.getElementById('switchBtn'),
       reloadConfigBtn: document.getElementById('reloadConfigBtn'),
+      apiStatus: document.getElementById('apiStatus'),
     };
 
-    function ensureApiUrl() {
-      if (!GAS_API_URL || GAS_API_URL.includes('REPLACE_WITH')) {
-        throw new Error('scanner/index.html の GAS_API_URL を設定してください');
-      }
+    function setApiStatus(text, ok) {
+      els.apiStatus.textContent = 'API: ' + text;
+      els.apiStatus.style.color = ok ? '#86efac' : '#fca5a5';
     }
 
-    function jsonp(url) {
-      return new Promise((resolve, reject) => {
-        const cb = 'cb_' + Date.now() + '_' + Math.floor(Math.random() * 10000);
-        const script = document.createElement('script');
-        const timer = setTimeout(() => {
-          cleanup();
-          reject(new Error('API timeout'));
-        }, 15000);
-
-        function cleanup() {
-          clearTimeout(timer);
-          delete window[cb];
-          script.remove();
-        }
-
-        window[cb] = (data) => {
-          cleanup();
-          resolve(data);
-        };
-
-        const sep = url.includes('?') ? '&' : '?';
-        script.src = url + sep + 'callback=' + cb;
-        script.onerror = () => {
-          cleanup();
-          reject(new Error('API load error'));
-        };
-        document.head.appendChild(script);
-      });
+    async function gasFetch(params) {
+      const url = new URL(GAS_API_URL);
+      Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+      const res = await fetch(url.toString(), { redirect: 'follow', mode: 'cors' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'API error');
+      return data;
     }
 
     async function loadConfig() {
-      ensureApiUrl();
-      const data = await jsonp(GAS_API_URL + '?action=config');
-      if (!data.ok) throw new Error(data.error || 'config error');
+      const data = await gasFetch({ action: 'config' });
       state.config = data.config;
-      els.switchBtn.hidden = !state.config.showCameraSwitch;
-      await loadJsQr(state.config.jsQrUrl);
+      const jsQrUrl = (state.config && state.config.jsQrUrl) || JSQR_URL;
+      els.switchBtn.hidden = !(state.config && state.config.showCameraSwitch);
+      await loadJsQr(jsQrUrl);
+      setApiStatus('接続OK', true);
+      return state.config;
     }
 
     function loadJsQr(url) {
@@ -193,33 +177,63 @@
         const script = document.createElement('script');
         script.src = url;
         script.onload = resolve;
-        script.onerror = () => reject(new Error('jsQR load failed'));
+        script.onerror = () => reject(new Error('jsQRの読み込みに失敗しました'));
         document.head.appendChild(script);
       });
     }
 
     async function startCamera() {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('このブラウザはカメラに対応していません');
+        throw new Error('このブラウザはカメラに対応していません（Chrome推奨）');
       }
       stopCamera();
+
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            facingMode: IS_MOBILE ? { ideal: 'environment' } : undefined,
+          },
+          audio: false,
+        });
+      } catch (err) {
+        throw new Error('カメラを起動できませんでした。ブラウザのカメラ許可を確認してください。\n' + err);
+      }
+
       const devices = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
-      state.devices = devices.length ? devices : [{ deviceId: undefined }];
-      const device = state.devices[state.deviceIndex] || state.devices[0];
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          deviceId: device.deviceId ? { exact: device.deviceId } : undefined,
-          facingMode: device.deviceId ? undefined : { ideal: 'environment' },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-        audio: false,
-      });
+      state.devices = devices.length ? devices : [{ deviceId: '' }];
+      if (state.devices.length > 1) els.switchBtn.hidden = false;
+
       state.stream = stream;
       els.video.srcObject = stream;
       await els.video.play();
       state.scanning = true;
       els.startBtn.textContent = 'スキャン中';
+      requestAnimationFrame(scanLoop);
+    }
+
+    async function startCameraDevice() {
+      stopCamera();
+      const device = state.devices[state.deviceIndex] || state.devices[0];
+      const constraints = {
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      };
+      if (device && device.deviceId) {
+        constraints.video.deviceId = { exact: device.deviceId };
+      } else if (IS_MOBILE) {
+        constraints.video.facingMode = { ideal: 'environment' };
+      }
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      state.stream = stream;
+      els.video.srcObject = stream;
+      await els.video.play();
+      state.scanning = true;
       requestAnimationFrame(scanLoop);
     }
 
@@ -236,7 +250,7 @@
       box.className = 'result';
       if (!payload || payload.status === 'error') {
         box.classList.add('err');
-        box.innerHTML = '<p class="status-label">エラー</p><p class="error">' + (payload && payload.message ? payload.message : '不明なエラー') + '</p>';
+        box.innerHTML = '<p class="status-label">エラー</p><p class="error">' + escapeHtml((payload && payload.message) || '不明なエラー') + '</p>';
         return;
       }
       if (payload.status === 'scanned') box.classList.add('ok');
@@ -267,7 +281,7 @@
       state.lastCode = code;
       state.lastAt = now;
       try {
-        const data = await jsonp(GAS_API_URL + '?action=scan&code=' + encodeURIComponent(code));
+        const data = await gasFetch({ action: 'scan', code });
         renderResult(data);
       } catch (err) {
         renderResult({ status: 'error', message: String(err) });
@@ -292,10 +306,17 @@
 
     els.startBtn.addEventListener('click', async () => {
       try {
-        await loadConfig();
-        await startCamera();
+        renderResult({ status: 'error', message: 'カメラを起動しています…' });
+        const configPromise = loadConfig().catch((err) => {
+          setApiStatus('接続失敗', false);
+          throw new Error('API接続エラー: ' + err + '\nGASのデプロイURLを確認してください。');
+        });
+        const cameraPromise = startCamera();
+        await Promise.all([configPromise, cameraPromise]);
+        renderResult({ status: 'scanned', message1: 'カメラ起動完了。QRをかざしてください。', guest: {}, code: '' });
       } catch (err) {
         renderResult({ status: 'error', message: String(err) });
+        els.startBtn.textContent = 'カメラ開始';
       }
     });
 
@@ -303,7 +324,7 @@
       if (!state.devices.length) return;
       state.deviceIndex = (state.deviceIndex + 1) % state.devices.length;
       try {
-        await startCamera();
+        await startCameraDevice();
       } catch (err) {
         renderResult({ status: 'error', message: String(err) });
       }
